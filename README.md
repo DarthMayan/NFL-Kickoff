@@ -1,118 +1,185 @@
-# Kickoff - NFL Prediction Game
+# 🏈 Kickoff - NFL Prediction Game
 
-A distributed microservices application for NFL game predictions and leaderboards built with Go and Consul for service discovery.
+Una aplicación de microservicios distribuidos para predicciones NFL con Go, Docker y Consul.
 
-## Architecture
+## 🐳 **SOLO DOCKER** - Ejecución Simplificada
 
-Kickoff follows a microservices architecture with the following services:
+### ✅ Iniciar Proyecto Completo:
+```bash
+./start-project.bat
+```
 
-- **User Service** (port 8081) - User management and authentication
-- **Game Service** (port 8082) - NFL teams and games management
-- **Prediction Service** (port 8083) - User predictions for games
-- **Leaderboard Service** (port 8084) - Rankings and statistics
-- **Gateway Service** (port 8080) - API Gateway and main entry point
-- **Consul** (port 8500) - Service discovery and health checking
+### ⛔ Detener Proyecto:
+```bash
+./stop-project.bat
+```
 
-## Prerequisites
+## 🏗️ Arquitectura de Microservicios
 
-- Go 1.21 or higher
-- Docker Desktop
+- **Consul** (Puerto 8500) - Service Discovery y Health Checks
+- **Gateway** (Puerto 8080) - API Gateway principal
+- **User Service** (Puerto 8081) - Gestión de usuarios
+- **Game Service** (Puerto 8082) - Equipos y juegos NFL
+- **Prediction Service** (Puerto 8083) - Predicciones de usuarios
+- **Leaderboard Service** (Puerto 8084) - Rankings y estadísticas
+
+## 📋 Requisitos
+
+- **Docker Desktop** (único requisito)
 - Git
 
-## Setup
+## 🚀 Configuración Instantánea
 
-1. Clone the repository:
 ```bash
 git clone <repository-url>
 cd kickoff
+./start-project.bat
 ```
 
-2. Start Consul:
+**¡Listo!** Todos los servicios se ejecutan automáticamente.
+
+## 🔗 URLs Principales
+
+### Interfaces Web:
+- **Consul UI**: http://localhost:8500 (Service Discovery)
+- **Gateway**: http://localhost:8080/health (API Gateway principal)
+
+### Health Checks:
+- **Gateway**: http://localhost:8080/health
+- **User Service**: http://localhost:8081/health
+- **Game Service**: http://localhost:8082/health
+- **Prediction Service**: http://localhost:8083/health
+- **Leaderboard Service**: http://localhost:8084/health
+
+### APIs a través del Gateway (Recomendado):
+- **Usuarios**: http://localhost:8080/api/users
+- **Equipos NFL**: http://localhost:8080/api/teams
+- **Juegos NFL**: http://localhost:8080/api/games
+- **Predicciones**: http://localhost:8080/api/predictions
+- **Leaderboard**: http://localhost:8080/api/leaderboard
+- **Estadísticas Usuario**: http://localhost:8080/api/user-stats/{userID}
+- **Predicciones Usuario**: http://localhost:8080/api/predictions/user/{userID}
+
+### APIs Directas (Servicios individuales):
+- **Usuarios**: http://localhost:8081/v2/users
+- **Equipos NFL**: http://localhost:8082/v2/teams
+- **Predicciones**: http://localhost:8083/v2/predictions
+
+## 📖 Uso de APIs
+
+### 🌐 A través del Gateway (Recomendado):
+
+#### 1. Ver usuarios:
 ```bash
-./run-consul.bat
+curl http://localhost:8080/api/users
 ```
 
-3. Install dependencies:
+#### 2. Ver equipos NFL:
 ```bash
-go mod tidy
+curl http://localhost:8080/api/teams
 ```
 
-## Running the Services
-
-Start each service in a separate terminal:
-
+#### 3. Ver juegos NFL:
 ```bash
-# Terminal 1 - User Service
-go run user/cmd/main/main.go
-
-# Terminal 2 - Game Service  
-go run game/cmd/main/main.go
-
-# Terminal 3 - Prediction Service
-go run prediction/cmd/main/main.go
-
-# Terminal 4 - Leaderboard Service
-go run leaderboard/cmd/main/main.go
-
-# Terminal 5 - Gateway Service
-go run gateway/cmd/main/main.go
+curl http://localhost:8080/api/games
 ```
 
-## API Endpoints
-
-### Gateway (Port 8080)
-- `GET /api/users` - Get all users
-- `POST /api/users` - Create a new user
-- `GET /api/teams` - Get all NFL teams
-- `GET /api/games` - Get all games
-- `GET /api/predictions` - Get all predictions
-- `POST /api/predictions` - Create a prediction
-- `GET /api/leaderboard` - Get current leaderboard
-
-### Direct Service Access
-Each service also exposes endpoints directly on their respective ports for development and debugging.
-
-## Example Usage
-
-1. Create a user:
+#### 4. Ver predicciones:
 ```bash
-curl -X POST http://localhost:8080/api/users \
-  -H "Content-Type: application/json" \
-  -d '{"username": "john_doe", "email": "john@example.com", "fullName": "John Doe"}'
+curl http://localhost:8080/api/predictions
 ```
 
-2. Make a prediction:
-```bash
-curl -X POST http://localhost:8080/api/predictions \
-  -H "Content-Type: application/json" \
-  -d '{"userId": "user_john_doe", "gameId": "1", "predictedWinnerId": "KC"}'
-```
-
-3. Check leaderboard:
+#### 5. Ver leaderboard:
 ```bash
 curl http://localhost:8080/api/leaderboard
 ```
 
-## Service Discovery
+#### 6. Ver estadísticas de usuario específico:
+```bash
+curl http://localhost:8080/api/user-stats/user_1
+```
 
-All services automatically register with Consul and can discover each other dynamically. Check the Consul UI at http://localhost:8500 to see all registered services.
+#### 7. Ver predicciones de usuario específico:
+```bash
+curl http://localhost:8080/api/predictions/user/user_1
+```
 
-## Development
+### 🔧 Directamente a servicios individuales:
 
-The project follows a clean architecture pattern with:
-- Repository pattern for data access
-- Controller layer for business logic  
-- HTTP handlers for API endpoints
-- Service-specific models and interfaces
+#### 1. Crear usuario:
+```bash
+curl -X POST http://localhost:8081/v2/users \
+  -H "Content-Type: application/json" \
+  -d '{"username": "john_doe", "email": "john@example.com", "fullName": "John Doe"}'
+```
 
-## Tech Stack
+#### 2. Ver equipos:
+```bash
+curl http://localhost:8082/v2/teams
+```
 
-- **Language**: Go
+#### 3. Crear predicción:
+```bash
+curl -X POST http://localhost:8083/v2/predictions \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "user_1", "gameId": "1", "predictedWinnerId": "KC"}'
+```
+
+## 🛠️ Monitoreo
+
+- **Estado servicios**: `docker-compose ps`
+- **Logs en tiempo real**: `docker-compose logs -f`
+- **Logs servicio específico**: `docker-compose logs -f user-service`
+
+## 🏗️ Arquitectura Técnica
+
+- **Lenguaje**: Go
 - **Service Discovery**: Consul
-- **Architecture**: Microservices
-- **Storage**: In-memory (development)
-- **Containerization**: Docker
+- **Contenedores**: Docker + Docker Compose
+- **Comunicación**: APIs REST
+- **Patrones**: Microservicios, Clean Architecture
+- **Storage**: In-memory (desarrollo)
 
-## Project Status
+## ⚠️ Solución de Problemas
 
-This is a learning project for distributed systems development. Current features include basic CRUD operations, service discovery, and inter-service communication.
+### Error de puerto en uso:
+```bash
+# Verificar qué está usando los puertos
+netstat -an | findstr ":8500"
+netstat -an | findstr ":8080"
+
+# Detener todos los contenedores
+docker-compose down --volumes --remove-orphans
+```
+
+### Los servicios no inician:
+```bash
+# Ver logs de servicios
+docker-compose logs consul
+docker-compose logs user-service
+
+# Limpiar y reconstruir
+docker-compose down --volumes --remove-orphans
+docker-compose up --build -d
+```
+
+### Comandos útiles:
+```bash
+# Ver estado de servicios
+docker-compose ps
+
+# Ver logs en tiempo real
+docker-compose logs -f
+
+# Parar todo y limpiar
+./stop-project.bat
+```
+
+## 📚 Scripts Incluidos
+
+- `start-project.bat`: Inicia todo el proyecto automáticamente
+- `stop-project.bat`: Detiene y limpia todos los contenedores
+
+---
+
+**✅ Proyecto optimizado para desarrollo y aprendizaje de sistemas distribuidos con Docker.**

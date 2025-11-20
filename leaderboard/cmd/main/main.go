@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"sort"
 	"time"
 
@@ -52,7 +53,11 @@ func main() {
 	log.Printf("Starting leaderboard service on port %d", port)
 
 	// Crear conexión con Consul
-	registry, err := consul.NewRegistry("localhost:8500")
+	consulAddr := os.Getenv("CONSUL_ADDRESS")
+	if consulAddr == "" {
+		log.Fatal("CONSUL_ADDRESS environment variable is required")
+	}
+	registry, err := consul.NewRegistry(consulAddr)
 	if err != nil {
 		panic(err)
 	}
@@ -60,8 +65,8 @@ func main() {
 	ctx := context.Background()
 	instanceID := discovery.GenerateInstanceID(serviceName)
 
-	// Registrar servicio en Consul
-	if err := registry.Register(ctx, instanceID, serviceName, fmt.Sprintf("localhost:%d", port)); err != nil {
+	// Registrar servicio en Consul con el nombre del contenedor
+	if err := registry.Register(ctx, instanceID, serviceName, fmt.Sprintf("leaderboard-service:%d", port)); err != nil {
 		panic(err)
 	}
 

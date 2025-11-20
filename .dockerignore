@@ -1,0 +1,41 @@
+# Binarios compilados
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+main
+main.exe
+
+# Archivos de test
+*.test
+
+# Directorios de salida
+/tmp/
+
+# Archivos de dependencias
+/vendor/
+
+# Archivos de IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Archivos de Docker
+Dockerfile*
+docker-compose*
+
+# Git
+.git
+.gitignore
+
+# Archivos temporales
+*.tmp

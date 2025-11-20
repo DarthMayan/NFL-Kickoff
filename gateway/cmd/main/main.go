@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"kickoff.com/pkg/discovery"
@@ -27,7 +28,11 @@ func main() {
 	log.Printf("Starting gateway service on port %d", port)
 
 	// Crear conexión con Consul
-	registry, err := consul.NewRegistry("localhost:8500")
+	consulAddr := os.Getenv("CONSUL_ADDRESS")
+	if consulAddr == "" {
+		log.Fatal("CONSUL_ADDRESS environment variable is required")
+	}
+	registry, err := consul.NewRegistry(consulAddr)
 	if err != nil {
 		panic(err)
 	}
@@ -35,8 +40,8 @@ func main() {
 	ctx := context.Background()
 	instanceID := discovery.GenerateInstanceID(serviceName)
 
-	// Registrar servicio en Consul
-	if err := registry.Register(ctx, instanceID, serviceName, fmt.Sprintf("localhost:%d", port)); err != nil {
+	// Registrar servicio en Consul con el nombre del contenedor
+	if err := registry.Register(ctx, instanceID, serviceName, fmt.Sprintf("gateway-service:%d", port)); err != nil {
 		panic(err)
 	}
 
@@ -76,15 +81,8 @@ func (g *Gateway) healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) usersHandler(w http.ResponseWriter, r *http.Request) {
-	// Buscar el servicio user en Consul
-	addresses, err := g.registry.ServiceAddress(context.Background(), "user")
-	if err != nil {
-		http.Error(w, "User service not available", http.StatusServiceUnavailable)
-		return
-	}
-
-	// Usar la primera dirección disponible
-	userServiceURL := fmt.Sprintf("http://%s/users", addresses[0])
+	// Usar dirección directa del contenedor en lugar de service discovery
+	userServiceURL := "http://user-service:8081/v2/users"
 
 	// Llamar al servicio user
 	resp, err := http.Get(userServiceURL)
@@ -101,15 +99,8 @@ func (g *Gateway) usersHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) predictionsHandler(w http.ResponseWriter, r *http.Request) {
-	// Buscar el servicio prediction en Consul
-	addresses, err := g.registry.ServiceAddress(context.Background(), "prediction")
-	if err != nil {
-		http.Error(w, "Prediction service not available", http.StatusServiceUnavailable)
-		return
-	}
-
-	// Construir URL y reenviar la solicitud
-	predictionServiceURL := fmt.Sprintf("http://%s/predictions", addresses[0])
+	// Usar dirección directa del contenedor
+	predictionServiceURL := "http://prediction-service:8083/v2/predictions"
 
 	if r.Method == "GET" {
 		resp, err := http.Get(predictionServiceURL)
@@ -156,15 +147,8 @@ func (g *Gateway) userPredictionsHandler(w http.ResponseWriter, r *http.Request)
 	// Extraer userID de la URL
 	userID := r.URL.Path[len("/api/predictions/user/"):]
 
-	// Buscar el servicio prediction en Consul
-	addresses, err := g.registry.ServiceAddress(context.Background(), "prediction")
-	if err != nil {
-		http.Error(w, "Prediction service not available", http.StatusServiceUnavailable)
-		return
-	}
-
-	// Llamar al servicio prediction
-	predictionServiceURL := fmt.Sprintf("http://%s/predictions/user/%s", addresses[0], userID)
+	// Llamar al servicio prediction con dirección directa
+	predictionServiceURL := fmt.Sprintf("http://prediction-service:8083/v2/predictions/user/%s", userID)
 	resp, err := http.Get(predictionServiceURL)
 	if err != nil {
 		http.Error(w, "Error calling prediction service", http.StatusInternalServerError)
@@ -183,15 +167,8 @@ func (g *Gateway) leaderboardHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Buscar el servicio leaderboard en Consul
-	addresses, err := g.registry.ServiceAddress(context.Background(), "leaderboard")
-	if err != nil {
-		http.Error(w, "Leaderboard service not available", http.StatusServiceUnavailable)
-		return
-	}
-
-	// Llamar al servicio leaderboard
-	leaderboardServiceURL := fmt.Sprintf("http://%s/leaderboard", addresses[0])
+	// Llamar al servicio leaderboard con dirección directa
+	leaderboardServiceURL := "http://leaderboard-service:8084/v2/leaderboard"
 	resp, err := http.Get(leaderboardServiceURL)
 	if err != nil {
 		http.Error(w, "Error calling leaderboard service", http.StatusInternalServerError)
@@ -213,15 +190,8 @@ func (g *Gateway) userStatsHandler(w http.ResponseWriter, r *http.Request) {
 	// Extraer userID de la URL
 	userID := r.URL.Path[len("/api/user-stats/"):]
 
-	// Buscar el servicio leaderboard en Consul
-	addresses, err := g.registry.ServiceAddress(context.Background(), "leaderboard")
-	if err != nil {
-		http.Error(w, "Leaderboard service not available", http.StatusServiceUnavailable)
-		return
-	}
-
-	// Llamar al servicio leaderboard
-	leaderboardServiceURL := fmt.Sprintf("http://%s/user-stats/%s", addresses[0], userID)
+	// Llamar al servicio leaderboard con dirección directa
+	leaderboardServiceURL := fmt.Sprintf("http://leaderboard-service:8084/v2/user-stats/%s", userID)
 	resp, err := http.Get(leaderboardServiceURL)
 	if err != nil {
 		http.Error(w, "Error calling leaderboard service", http.StatusInternalServerError)
@@ -235,15 +205,8 @@ func (g *Gateway) userStatsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) teamsHandler(w http.ResponseWriter, r *http.Request) {
-	// Buscar el servicio game en Consul
-	addresses, err := g.registry.ServiceAddress(context.Background(), "game")
-	if err != nil {
-		http.Error(w, "Game service not available", http.StatusServiceUnavailable)
-		return
-	}
-
-	// Usar la primera dirección disponible
-	gameServiceURL := fmt.Sprintf("http://%s/teams", addresses[0])
+	// Usar dirección directa del contenedor
+	gameServiceURL := "http://game-service:8082/v2/teams"
 
 	// Llamar al servicio game
 	resp, err := http.Get(gameServiceURL)
@@ -260,15 +223,8 @@ func (g *Gateway) teamsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) gamesHandler(w http.ResponseWriter, r *http.Request) {
-	// Buscar el servicio game en Consul
-	addresses, err := g.registry.ServiceAddress(context.Background(), "game")
-	if err != nil {
-		http.Error(w, "Game service not available", http.StatusServiceUnavailable)
-		return
-	}
-
-	// Usar la primera dirección disponible
-	gameServiceURL := fmt.Sprintf("http://%s/games", addresses[0])
+	// Usar dirección directa del contenedor
+	gameServiceURL := "http://game-service:8082/v2/games"
 
 	// Llamar al servicio game
 	resp, err := http.Get(gameServiceURL)
