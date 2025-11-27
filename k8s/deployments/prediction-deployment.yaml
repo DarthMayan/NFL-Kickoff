@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prediction-service
+  namespace: kickoff
+  labels:
+    app: prediction
+    tier: backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: prediction
+  template:
+    metadata:
+      labels:
+        app: prediction
+        tier: backend
+    spec:
+      containers:
+      - name: prediction
+        image: kickoff-prediction-service:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 9083
+          name: grpc
+          protocol: TCP
+        env:
+        - name: DB_NAME
+          value: "prediction_db"
+        envFrom:
+        - configMapRef:
+            name: postgres-config
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        livenessProbe:
+          grpc:
+            port: 9083
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          grpc:
+            port: 9083
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3

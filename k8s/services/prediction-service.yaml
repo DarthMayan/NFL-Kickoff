@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: prediction-service
+  namespace: kickoff
+  labels:
+    app: prediction
+    tier: backend
+spec:
+  type: ClusterIP
+  selector:
+    app: prediction
+  ports:
+  - name: grpc
+    port: 9083
+    targetPort: 9083
+    protocol: TCP

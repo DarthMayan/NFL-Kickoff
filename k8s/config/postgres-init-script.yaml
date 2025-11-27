@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-script
+  namespace: kickoff
+data:
+  init.sql: |
+    -- Script de inicialización para crear múltiples bases de datos
+    -- Este script se ejecuta automáticamente cuando PostgreSQL se inicia por primera vez
+
+    -- Crear base de datos para User Service
+    CREATE DATABASE user_db;
+
+    -- Crear base de datos para Game Service
+    CREATE DATABASE game_db;
+
+    -- Crear base de datos para Prediction Service
+    CREATE DATABASE prediction_db;
+
+    -- Crear base de datos para Leaderboard Service
+    CREATE DATABASE leaderboard_db;
+
+    -- Otorgar permisos al usuario kickoff_user en todas las bases de datos
+    GRANT ALL PRIVILEGES ON DATABASE user_db TO kickoff_user;
+    GRANT ALL PRIVILEGES ON DATABASE game_db TO kickoff_user;
+    GRANT ALL PRIVILEGES ON DATABASE prediction_db TO kickoff_user;
+    GRANT ALL PRIVILEGES ON DATABASE leaderboard_db TO kickoff_user;

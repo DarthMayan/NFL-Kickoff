@@ -2,286 +2,263 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
-	"net/http"
+	"net"
 	"os"
-	"sort"
-	"time"
+	"os/signal"
+	"syscall"
 
-	"kickoff.com/pkg/discovery"
-	"kickoff.com/pkg/discovery/consul"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
+
+	"kickoff.com/leaderboard/internal/database"
+	"kickoff.com/leaderboard/internal/models"
+	pb "kickoff.com/proto"
 )
 
 const serviceName = "leaderboard"
 
-type UserScore struct {
-	UserID       string  `json:"userId"`
-	CorrectPicks int     `json:"correctPicks"`
-	TotalPicks   int     `json:"totalPicks"`
-	Percentage   float64 `json:"percentage"`
-	Rank         int     `json:"rank"`
-}
-
-type Game struct {
-	ID       string `json:"id"`
-	HomeTeam string `json:"homeTeam"`
-	AwayTeam string `json:"awayTeam"`
-	Winner   string `json:"winner,omitempty"` // Para juegos finalizados
-	Status   string `json:"status"`
-}
-
-type Prediction struct {
-	ID              string    `json:"id"`
-	UserID          string    `json:"userId"`
-	GameID          string    `json:"gameId"`
-	PredictedWinner string    `json:"predictedWinner"`
-	CreatedAt       time.Time `json:"createdAt"`
-}
-
-type Leaderboard struct {
-	registry discovery.Registry
+type LeaderboardService struct {
+	pb.UnimplementedLeaderboardServiceServer
 }
 
 func main() {
-	var port int
-	flag.IntVar(&port, "port", 8084, "API handler port")
+	var grpcPort int
+	flag.IntVar(&grpcPort, "grpc-port", 9084, "gRPC server port")
 	flag.Parse()
 
-	log.Printf("Starting leaderboard service on port %d", port)
+	log.Printf("Starting Leaderboard Service - gRPC:%d", grpcPort)
+	log.Printf("Service discovery: Kubernetes DNS")
 
-	// Crear conexión con Consul
-	consulAddr := os.Getenv("CONSUL_ADDRESS")
-	if consulAddr == "" {
-		log.Fatal("CONSUL_ADDRESS environment variable is required")
+	// Conectar a la base de datos
+	if err := database.Connect(); err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
 	}
-	registry, err := consul.NewRegistry(consulAddr)
+	defer database.Close()
+	log.Println("✅ Connected to PostgreSQL database")
+
+	leaderboardService := &LeaderboardService{}
+
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", grpcPort))
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to listen: %v", err)
 	}
 
-	ctx := context.Background()
-	instanceID := discovery.GenerateInstanceID(serviceName)
+	grpcServer := grpc.NewServer()
+	pb.RegisterLeaderboardServiceServer(grpcServer, leaderboardService)
 
-	// Registrar servicio en Consul con el nombre del contenedor
-	if err := registry.Register(ctx, instanceID, serviceName, fmt.Sprintf("leaderboard-service:%d", port)); err != nil {
-		panic(err)
-	}
+	healthServer := health.NewServer()
+	healthServer.SetServingStatus(serviceName, grpc_health_v1.HealthCheckResponse_SERVING)
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 
-	// Goroutine para reportar estado de salud
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
 	go func() {
-		for {
-			if err := registry.ReportHealthyState(instanceID, serviceName); err != nil {
-				log.Println("Failed to report healthy state: " + err.Error())
-			}
-			time.Sleep(1 * time.Second)
+		log.Printf("✅ gRPC server listening on :%d", grpcPort)
+		if err := grpcServer.Serve(lis); err != nil {
+			log.Fatalf("Failed to serve: %v", err)
 		}
 	}()
 
-	defer registry.Deregister(ctx, instanceID, serviceName)
-
-	leaderboard := &Leaderboard{registry: registry}
-
-	// Endpoints
-	http.HandleFunc("/health", leaderboard.healthHandler)
-	http.HandleFunc("/leaderboard", leaderboard.leaderboardHandler)
-	http.HandleFunc("/user-stats/", leaderboard.userStatsHandler)
-
-	log.Printf("Leaderboard service listening on :%d", port)
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil {
-		panic(err)
-	}
+	<-sigChan
+	log.Println("Shutting down gracefully...")
+	database.Close()
+	grpcServer.GracefulStop()
 }
 
-func (l *Leaderboard) healthHandler(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Leaderboard service is healthy"))
-}
+func (ls *LeaderboardService) GetLeaderboard(ctx context.Context, req *pb.GetLeaderboardRequest) (*pb.GetLeaderboardResponse, error) {
+	var userStats []models.UserStats
+	query := database.DB.Order("total_points DESC, correct_predictions DESC")
 
-func (l *Leaderboard) leaderboardHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+	if req.Limit > 0 {
+		query = query.Limit(int(req.Limit))
+	}
+	if req.Offset > 0 {
+		query = query.Offset(int(req.Offset))
 	}
 
-	// Obtener todas las predicciones del Prediction Service
-	predictions, err := l.getAllPredictions()
-	if err != nil {
-		http.Error(w, "Error fetching predictions", http.StatusInternalServerError)
-		return
+	if err := query.Find(&userStats).Error; err != nil {
+		log.Printf("Error fetching leaderboard: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to fetch leaderboard: %v", err)
 	}
 
-	// Para simplificar, vamos a simular que algunos juegos han terminado
-	// En una implementación real, esto vendría del Game Service
-	finishedGames := map[string]string{
-		"1": "KC",  // Kansas City ganó
-		"2": "BUF", // Buffalo ganó
+	// Actualizar rangos
+	for i := range userStats {
+		userStats[i].Rank = i + 1 + int(req.Offset)
+		database.DB.Model(&userStats[i]).Update("rank", userStats[i].Rank)
 	}
 
-	// Calcular estadísticas por usuario
-	userStats := make(map[string]*UserScore)
-
-	for _, prediction := range predictions {
-		if userStats[prediction.UserID] == nil {
-			userStats[prediction.UserID] = &UserScore{
-				UserID: prediction.UserID,
-			}
-		}
-
-		stats := userStats[prediction.UserID]
-		stats.TotalPicks++
-
-		// Verificar si la predicción fue correcta
-		if winner, gameFinished := finishedGames[prediction.GameID]; gameFinished {
-			if prediction.PredictedWinner == winner {
-				stats.CorrectPicks++
-			}
-		}
-	}
-
-	// Calcular porcentajes y convertir a slice para ordenar
-	var leaderboard []UserScore
+	var pbLeaderboard []*pb.UserScore
 	for _, stats := range userStats {
-		if stats.TotalPicks > 0 {
-			stats.Percentage = float64(stats.CorrectPicks) / float64(stats.TotalPicks) * 100
-		}
-		leaderboard = append(leaderboard, *stats)
+		pbLeaderboard = append(pbLeaderboard, &pb.UserScore{
+			UserId:      stats.UserID,
+			CorrectPicks: int32(stats.CorrectPredictions),
+			TotalPicks:  int32(stats.TotalPredictions),
+			Percentage:  calculatePercentage(stats.CorrectPredictions, stats.TotalPredictions),
+			Rank:        int32(stats.Rank),
+		})
 	}
 
-	// Ordenar por porcentaje (descendente)
-	sort.Slice(leaderboard, func(i, j int) bool {
-		return leaderboard[i].Percentage > leaderboard[j].Percentage
-	})
+	// Contar total de usuarios
+	var totalUsers int64
+	database.DB.Model(&models.UserStats{}).Count(&totalUsers)
 
-	// Asignar rankings
-	for i := range leaderboard {
-		leaderboard[i].Rank = i + 1
-	}
-
-	response := map[string]interface{}{
-		"leaderboard":   leaderboard,
-		"totalUsers":    len(leaderboard),
-		"gamesFinished": len(finishedGames),
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	return &pb.GetLeaderboardResponse{
+		Leaderboard:   pbLeaderboard,
+		TotalUsers:    int32(totalUsers),
+		GamesFinished: 0, // TODO: obtener de game service
+	}, nil
 }
 
-func (l *Leaderboard) userStatsHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+func (ls *LeaderboardService) GetUserStats(ctx context.Context, req *pb.GetUserStatsRequest) (*pb.GetUserStatsResponse, error) {
+	if req.UserId == "" {
+		return nil, status.Error(codes.InvalidArgument, "user_id is required")
 	}
 
-	// Extraer userID de la URL
-	userID := r.URL.Path[len("/user-stats/"):]
-	if userID == "" {
-		http.Error(w, "User ID is required", http.StatusBadRequest)
-		return
-	}
+	var userStats models.UserStats
+	result := database.DB.Where("user_id = ?", req.UserId).First(&userStats)
 
-	// Obtener predicciones del usuario específico
-	predictions, err := l.getUserPredictions(userID)
-	if err != nil {
-		http.Error(w, "Error fetching user predictions", http.StatusInternalServerError)
-		return
-	}
-
-	// Simular resultados de juegos
-	finishedGames := map[string]string{
-		"1": "KC",
-		"2": "BUF",
-	}
-
-	stats := UserScore{UserID: userID}
-	var detailedPredictions []map[string]interface{}
-
-	for _, prediction := range predictions {
-		stats.TotalPicks++
-
-		predictionDetail := map[string]interface{}{
-			"gameId":          prediction.GameID,
-			"predictedWinner": prediction.PredictedWinner,
-			"createdAt":       prediction.CreatedAt,
+	if result.Error != nil {
+		// Si no existe, crear un registro inicial
+		userStats = models.UserStats{
+			ID:                 fmt.Sprintf("stats_%s", req.UserId),
+			UserID:             req.UserId,
+			TotalPredictions:   0,
+			CorrectPredictions: 0,
+			WrongPredictions:   0,
+			TotalPoints:        0,
+			Rank:               0,
 		}
-
-		if winner, gameFinished := finishedGames[prediction.GameID]; gameFinished {
-			predictionDetail["actualWinner"] = winner
-			predictionDetail["correct"] = prediction.PredictedWinner == winner
-			if prediction.PredictedWinner == winner {
-				stats.CorrectPicks++
-			}
-		} else {
-			predictionDetail["gameStatus"] = "pending"
+		if err := database.DB.Create(&userStats).Error; err != nil {
+			log.Printf("Error creating user stats: %v", err)
+			return nil, status.Errorf(codes.Internal, "failed to create user stats: %v", err)
 		}
-
-		detailedPredictions = append(detailedPredictions, predictionDetail)
 	}
 
-	if stats.TotalPicks > 0 {
-		stats.Percentage = float64(stats.CorrectPicks) / float64(stats.TotalPicks) * 100
-	}
-
-	response := map[string]interface{}{
-		"userStats":   stats,
-		"predictions": detailedPredictions,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	return &pb.GetUserStatsResponse{
+		UserStats: &pb.UserScore{
+			UserId:      userStats.UserID,
+			CorrectPicks: int32(userStats.CorrectPredictions),
+			TotalPicks:  int32(userStats.TotalPredictions),
+			Percentage:  calculatePercentage(userStats.CorrectPredictions, userStats.TotalPredictions),
+			Rank:        int32(userStats.Rank),
+		},
+		Predictions:      []*pb.PredictionDetail{}, // TODO: obtener de prediction service
+		TotalPredictions: int32(userStats.TotalPredictions),
+	}, nil
 }
 
-func (l *Leaderboard) getAllPredictions() ([]Prediction, error) {
-	// Buscar el Prediction Service en Consul
-	addresses, err := l.registry.ServiceAddress(context.Background(), "prediction")
-	if err != nil {
-		return nil, err
+func (ls *LeaderboardService) GetTopUsers(ctx context.Context, req *pb.GetTopUsersRequest) (*pb.GetTopUsersResponse, error) {
+	limit := int(req.TopN)
+	if limit <= 0 {
+		limit = 10
 	}
 
-	// Llamar al endpoint de predicciones
-	url := fmt.Sprintf("http://%s/predictions", addresses[0])
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var response struct {
-		Predictions []Prediction `json:"predictions"`
+	var userStats []models.UserStats
+	if err := database.DB.Order("total_points DESC, correct_predictions DESC").Limit(limit).Find(&userStats).Error; err != nil {
+		log.Printf("Error fetching top users: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to fetch top users: %v", err)
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return nil, err
+	// Actualizar rangos
+	for i := range userStats {
+		userStats[i].Rank = i + 1
+		database.DB.Model(&userStats[i]).Update("rank", userStats[i].Rank)
 	}
 
-	return response.Predictions, nil
+	var pbPlayers []*pb.UserScore
+	for _, stats := range userStats {
+		pbPlayers = append(pbPlayers, &pb.UserScore{
+			UserId:      stats.UserID,
+			CorrectPicks: int32(stats.CorrectPredictions),
+			TotalPicks:  int32(stats.TotalPredictions),
+			Percentage:  calculatePercentage(stats.CorrectPredictions, stats.TotalPredictions),
+			Rank:        int32(stats.Rank),
+		})
+	}
+
+	return &pb.GetTopUsersResponse{
+		TopUsers: pbPlayers,
+		Total:    int32(len(pbPlayers)),
+	}, nil
 }
 
-func (l *Leaderboard) getUserPredictions(userID string) ([]Prediction, error) {
-	// Buscar el Prediction Service en Consul
-	addresses, err := l.registry.ServiceAddress(context.Background(), "prediction")
-	if err != nil {
-		return nil, err
+func (ls *LeaderboardService) GetUserRank(ctx context.Context, req *pb.GetUserRankRequest) (*pb.GetUserRankResponse, error) {
+	if req.UserId == "" {
+		return nil, status.Error(codes.InvalidArgument, "user_id is required")
 	}
 
-	// Llamar al endpoint de predicciones del usuario
-	url := fmt.Sprintf("http://%s/predictions/user/%s", addresses[0], userID)
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var response struct {
-		Predictions []Prediction `json:"predictions"`
+	var userStats models.UserStats
+	if err := database.DB.Where("user_id = ?", req.UserId).First(&userStats).Error; err != nil {
+		return nil, status.Error(codes.NotFound, "User stats not found")
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return nil, err
+	// Contar cuántos usuarios tienen mejor puntaje
+	var betterCount int64
+	database.DB.Model(&models.UserStats{}).
+		Where("total_points > ? OR (total_points = ? AND correct_predictions > ?)",
+			userStats.TotalPoints, userStats.TotalPoints, userStats.CorrectPredictions).
+		Count(&betterCount)
+
+	rank := int(betterCount) + 1
+	userStats.Rank = rank
+	database.DB.Model(&userStats).Update("rank", rank)
+
+	// Contar total de usuarios
+	var totalUsers int64
+	database.DB.Model(&models.UserStats{}).Count(&totalUsers)
+
+	return &pb.GetUserRankResponse{
+		UserScore: &pb.UserScore{
+			UserId:      userStats.UserID,
+			CorrectPicks: int32(userStats.CorrectPredictions),
+			TotalPicks:  int32(userStats.TotalPredictions),
+			Percentage:  calculatePercentage(userStats.CorrectPredictions, userStats.TotalPredictions),
+			Rank:        int32(rank),
+		},
+		Rank:       int32(rank),
+		TotalUsers: int32(totalUsers),
+	}, nil
+}
+
+func (ls *LeaderboardService) RecalculateLeaderboard(ctx context.Context, req *pb.RecalculateLeaderboardRequest) (*pb.RecalculateLeaderboardResponse, error) {
+	// Obtener todos los usuarios ordenados por puntos
+	var userStats []models.UserStats
+	if err := database.DB.Order("total_points DESC, correct_predictions DESC").Find(&userStats).Error; err != nil {
+		log.Printf("Error fetching users for recalculation: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to fetch users: %v", err)
 	}
 
-	return response.Predictions, nil
+	// Actualizar rangos
+	for i := range userStats {
+		userStats[i].Rank = i + 1
+		if err := database.DB.Model(&userStats[i]).Update("rank", userStats[i].Rank).Error; err != nil {
+			log.Printf("Error updating rank for user %s: %v", userStats[i].UserID, err)
+		}
+	}
+
+	log.Printf("Recalculated leaderboard for %d users", len(userStats))
+
+	return &pb.RecalculateLeaderboardResponse{
+		Message:        "Leaderboard recalculated successfully",
+		UsersProcessed: int32(len(userStats)),
+		GamesEvaluated: 0, // TODO: integrar con game service
+	}, nil
+}
+
+// ========================================
+// Helper Functions
+// ========================================
+
+func calculatePercentage(correct, total int) float64 {
+	if total == 0 {
+		return 0.0
+	}
+	return float64(correct) / float64(total) * 100.0
 }

@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd c:UsersdiegoDesktopClasesComputo Distribuidokickoff)",
+      "Bash(go build:*)",
+      "Bash(cd:*)",
+      "Bash(go fmt:*)",
+      "Bash(docker build:*)",
+      "Bash(kubectl apply:*)",
+      "Bash(kubectl rollout:*)",
+      "Bash(kubectl get:*)",
+      "Bash(powershell -Command \"Invoke-RestMethod -Uri ''http://localhost:8080/api/teams'' -Method Get | ConvertTo-Json -Depth 3 | Select-Object -First 50\")",
+      "Bash(powershell -Command:*)",
+      "Bash(winget install:*)",
+      "Bash(kind create:*)",
+      "Bash(powershell -NoProfile -Command \"$env:PATH = [System.Environment]::GetEnvironmentVariable(''Path'',''Machine'') + '';'' + [System.Environment]::GetEnvironmentVariable(''Path'',''User''); cd ''c:\\Users\\diego\\Desktop\\Clases\\Computo Distribuido\\kickoff''; kind create cluster --name kickoff --config kind-config.yaml\")",
+      "Bash(\"/c/Users/diego/AppData/Local/Microsoft/WinGet/Links/kind.exe\" create cluster --name kickoff --config kind-config.yaml)",
+      "Bash(cmd.exe /c create-kind-cluster.bat)",
+      "Bash(go get:*)",
+      "Bash(kubectl cluster-info:*)",
+      "Bash(kind load docker-image:*)",
+      "Bash(kubectl delete:*)",
+      "Bash(kubectl describe:*)",
+      "Bash(kubectl logs:*)",
+      "Bash(curl:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -2,280 +2,312 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
-	"net/http"
+	"net"
 	"os"
-	"strings"
-	"time"
+	"os/signal"
+	"syscall"
 
-	"kickoff.com/pkg/discovery"
-	"kickoff.com/pkg/discovery/consul"
-	"kickoff.com/pkg/models"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"kickoff.com/user/internal/database"
+	"kickoff.com/user/internal/models"
+	pb "kickoff.com/proto"
 )
 
 const serviceName = "user"
 
 type UserService struct {
-	users   map[string]models.User
-	counter int
+	pb.UnimplementedUserServiceServer
 }
 
 func main() {
-	var port int
-	flag.IntVar(&port, "port", 8081, "API handler port")
+	var grpcPort int
+	flag.IntVar(&grpcPort, "grpc-port", 9081, "gRPC server port")
 	flag.Parse()
 
-	log.Printf("Starting user service on port %d", port)
+	log.Printf("Starting User Service - gRPC:%d", grpcPort)
+	log.Printf("Service discovery: Kubernetes DNS")
 
-	// Crear conexión con Consul
-	consulAddr := os.Getenv("CONSUL_ADDRESS")
-	if consulAddr == "" {
-		log.Fatal("CONSUL_ADDRESS environment variable is required")
+	// Conectar a la base de datos
+	if err := database.Connect(); err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
 	}
-	registry, err := consul.NewRegistry(consulAddr)
+	log.Println("✅ Connected to PostgreSQL database")
+
+	// Inicializar servicio
+	userService := &UserService{}
+
+	// Crear listener para gRPC
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", grpcPort))
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to listen: %v", err)
 	}
 
-	ctx := context.Background()
-	instanceID := discovery.GenerateInstanceID(serviceName)
+	// Crear servidor gRPC
+	grpcServer := grpc.NewServer()
+	pb.RegisterUserServiceServer(grpcServer, userService)
 
-	// Registrar servicio en Consul con el nombre del contenedor
-	if err := registry.Register(ctx, instanceID, serviceName, fmt.Sprintf("user-service:%d", port)); err != nil {
-		panic(err)
-	}
+	// Registrar health check
+	healthServer := health.NewServer()
+	healthServer.SetServingStatus(serviceName, grpc_health_v1.HealthCheckResponse_SERVING)
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 
-	// Goroutine para reportar estado de salud cada segundo
+	// Graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
 	go func() {
-		for {
-			if err := registry.ReportHealthyState(instanceID, serviceName); err != nil {
-				log.Println("Failed to report healthy state: " + err.Error())
-			}
-			time.Sleep(1 * time.Second)
+		log.Printf("✅ gRPC server listening on :%d", grpcPort)
+		if err := grpcServer.Serve(lis); err != nil {
+			log.Fatalf("Failed to serve: %v", err)
 		}
 	}()
 
-	// Asegurar que se desregistre al terminar
-	defer registry.Deregister(ctx, instanceID, serviceName)
-
-	// Inicializar servicio
-	userService := &UserService{
-		users:   make(map[string]models.User),
-		counter: 1,
-	}
-
-	// Crear algunos usuarios de ejemplo
-	userService.createSampleUsers()
-
-	// === ENDPOINTS EXISTENTES (mantener funcionando) ===
-	http.HandleFunc("/health", userService.healthHandler)
-	http.HandleFunc("/users", userService.usersHandlerOld) // Endpoint original
-
-	// === NUEVOS ENDPOINTS CON MODELOS ROBUSTOS ===
-	http.HandleFunc("/v2/users", userService.usersHandlerNew)           // CRUD completo
-	http.HandleFunc("/v2/users/", userService.userByIDHandler)          // Usuario por ID
-	http.HandleFunc("/v2/users/search/", userService.userSearchHandler) // Búsqueda por username/email
-
-	log.Printf("User service listening on :%d", port)
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", port), nil); err != nil {
-		panic(err)
-	}
+	// Wait for termination signal
+	<-sigChan
+	log.Println("Shutting down gracefully...")
+	database.Close()
+	grpcServer.GracefulStop()
 }
 
-func (us *UserService) createSampleUsers() {
-	sampleUsers := []models.CreateUserRequest{
-		{Username: "user1", Email: "user1@kickoff.com", FullName: "John Doe"},
-		{Username: "user2", Email: "user2@kickoff.com", FullName: "Jane Smith"},
-		{Username: "nflFan123", Email: "nfl.fan@gmail.com", FullName: "Mike Johnson"},
+// ========================================
+// gRPC Service Implementation
+// ========================================
+
+func (s *UserService) CreateUser(ctx context.Context, req *pb.CreateUserRequest) (*pb.CreateUserResponse, error) {
+	// Verificar que username sea único
+	var existingUser models.User
+	if err := database.DB.Where("username = ?", req.Username).First(&existingUser).Error; err == nil {
+		return nil, status.Errorf(codes.AlreadyExists, "username already exists: %s", req.Username)
 	}
 
-	for _, req := range sampleUsers {
-		us.createUser(req)
+	// Verificar que email sea único
+	if err := database.DB.Where("email = ?", req.Email).First(&existingUser).Error; err == nil {
+		return nil, status.Errorf(codes.AlreadyExists, "email already exists: %s", req.Email)
 	}
-}
 
-func (us *UserService) createUser(req models.CreateUserRequest) models.User {
+	// Crear nuevo usuario
 	user := models.User{
-		ID:        fmt.Sprintf("user_%d", us.counter),
-		Username:  req.Username,
-		Email:     req.Email,
-		FullName:  req.FullName,
-		CreatedAt: time.Now(),
-		Active:    true,
+		ID:       generateUserID(),
+		Username: req.Username,
+		Email:    req.Email,
+		FullName: req.FullName,
+		Active:   true,
 	}
-	us.counter++
-	us.users[user.ID] = user
-	return user
+
+	if err := database.DB.Create(&user).Error; err != nil {
+		log.Printf("Error creating user: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to create user: %v", err)
+	}
+
+	log.Printf("Created user: %s (%s)", user.Username, user.ID)
+
+	return &pb.CreateUserResponse{
+		User: &pb.User{
+			Id:        user.ID,
+			Username:  user.Username,
+			Email:     user.Email,
+			FullName:  user.FullName,
+			CreatedAt: timestamppb.New(user.CreatedAt),
+			Active:    user.Active,
+		},
+		Message: "User created successfully",
+	}, nil
 }
 
-func (us *UserService) healthHandler(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("User service is healthy"))
+func (s *UserService) GetUserByID(ctx context.Context, req *pb.GetUserByIDRequest) (*pb.GetUserByIDResponse, error) {
+	var user models.User
+	if err := database.DB.Where("id = ?", req.UserId).First(&user).Error; err != nil {
+		return nil, status.Errorf(codes.NotFound, "user not found: %s", req.UserId)
+	}
+
+	return &pb.GetUserByIDResponse{
+		User: &pb.User{
+			Id:        user.ID,
+			Username:  user.Username,
+			Email:     user.Email,
+			FullName:  user.FullName,
+			CreatedAt: timestamppb.New(user.CreatedAt),
+			Active:    user.Active,
+		},
+	}, nil
 }
 
-// === ENDPOINT ORIGINAL (NO TOCAR) ===
-func (us *UserService) usersHandlerOld(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"message": "User service is running", "service": "user"}`))
+func (s *UserService) GetAllUsers(ctx context.Context, req *pb.GetAllUsersRequest) (*pb.GetAllUsersResponse, error) {
+	var users []models.User
+	query := database.DB
+
+	if req.ActiveOnly {
+		query = query.Where("active = ?", true)
+	}
+
+	if err := query.Find(&users).Error; err != nil {
+		log.Printf("Error fetching users: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to fetch users: %v", err)
+	}
+
+	var pbUsers []*pb.User
+	for _, user := range users {
+		pbUsers = append(pbUsers, &pb.User{
+			Id:        user.ID,
+			Username:  user.Username,
+			Email:     user.Email,
+			FullName:  user.FullName,
+			CreatedAt: timestamppb.New(user.CreatedAt),
+			Active:    user.Active,
+		})
+	}
+
+	return &pb.GetAllUsersResponse{
+		Users: pbUsers,
+		Total: int32(len(pbUsers)),
+	}, nil
 }
 
-// === NUEVOS ENDPOINTS CON MODELOS ROBUSTOS ===
-func (us *UserService) usersHandlerNew(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	switch r.Method {
-	case "GET":
-		// Obtener todos los usuarios
-		var users []models.User
-		for _, user := range us.users {
-			users = append(users, user)
-		}
-
-		response := map[string]interface{}{
-			"users": users,
-			"total": len(users),
-		}
-		json.NewEncoder(w).Encode(response)
-
-	case "POST":
-		// Crear nuevo usuario
-		var req models.CreateUserRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
-			return
-		}
-
-		// Validar campos requeridos
-		if req.Username == "" || req.Email == "" || req.FullName == "" {
-			http.Error(w, "Missing required fields: username, email, fullName", http.StatusBadRequest)
-			return
-		}
-
-		// Verificar que username no exista
-		for _, user := range us.users {
-			if user.Username == req.Username {
-				http.Error(w, "Username already exists", http.StatusConflict)
-				return
-			}
-		}
-
-		// Verificar que email no exista
-		for _, user := range us.users {
-			if user.Email == req.Email {
-				http.Error(w, "Email already exists", http.StatusConflict)
-				return
-			}
-		}
-
-		// Crear usuario
-		user := us.createUser(req)
-
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(user)
-
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+func (s *UserService) UpdateUser(ctx context.Context, req *pb.UpdateUserRequest) (*pb.UpdateUserResponse, error) {
+	var user models.User
+	if err := database.DB.Where("id = ?", req.UserId).First(&user).Error; err != nil {
+		return nil, status.Errorf(codes.NotFound, "user not found: %s", req.UserId)
 	}
+
+	// Actualizar campos
+	updates := make(map[string]interface{})
+	if req.Username != "" {
+		updates["username"] = req.Username
+	}
+	if req.Email != "" {
+		updates["email"] = req.Email
+	}
+	if req.FullName != "" {
+		updates["full_name"] = req.FullName
+	}
+	if req.Active != nil {
+		updates["active"] = *req.Active
+	}
+
+	if err := database.DB.Model(&user).Updates(updates).Error; err != nil {
+		log.Printf("Error updating user: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to update user: %v", err)
+	}
+
+	// Recargar usuario actualizado
+	database.DB.Where("id = ?", req.UserId).First(&user)
+
+	log.Printf("Updated user: %s", req.UserId)
+
+	return &pb.UpdateUserResponse{
+		User: &pb.User{
+			Id:        user.ID,
+			Username:  user.Username,
+			Email:     user.Email,
+			FullName:  user.FullName,
+			CreatedAt: timestamppb.New(user.CreatedAt),
+			Active:    user.Active,
+		},
+		Message: "User updated successfully",
+	}, nil
 }
 
-func (us *UserService) userByIDHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	// Extraer user ID de la URL (/v2/users/{userID})
-	userID := strings.TrimPrefix(r.URL.Path, "/v2/users/")
-
-	switch r.Method {
-	case "GET":
-		user, exists := us.users[userID]
-		if !exists {
-			http.Error(w, "User not found", http.StatusNotFound)
-			return
-		}
-		json.NewEncoder(w).Encode(user)
-
-	case "PUT":
-		// Actualizar usuario
-		user, exists := us.users[userID]
-		if !exists {
-			http.Error(w, "User not found", http.StatusNotFound)
-			return
-		}
-
-		var req models.UpdateUserRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
-			return
-		}
-
-		// Actualizar campos que no estén vacíos
-		if req.Username != "" {
-			user.Username = req.Username
-		}
-		if req.Email != "" {
-			user.Email = req.Email
-		}
-		if req.FullName != "" {
-			user.FullName = req.FullName
-		}
-		if req.Active != nil {
-			user.Active = *req.Active
-		}
-
-		us.users[userID] = user
-		json.NewEncoder(w).Encode(user)
-
-	case "DELETE":
-		// Desactivar usuario (soft delete)
-		user, exists := us.users[userID]
-		if !exists {
-			http.Error(w, "User not found", http.StatusNotFound)
-			return
-		}
-
-		user.Active = false
-		us.users[userID] = user
-
-		w.WriteHeader(http.StatusNoContent)
-
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+func (s *UserService) DeleteUser(ctx context.Context, req *pb.DeleteUserRequest) (*pb.DeleteUserResponse, error) {
+	var user models.User
+	if err := database.DB.Where("id = ?", req.UserId).First(&user).Error; err != nil {
+		return nil, status.Errorf(codes.NotFound, "user not found: %s", req.UserId)
 	}
+
+	// Soft delete - marcar como inactivo
+	if err := database.DB.Model(&user).Update("active", false).Error; err != nil {
+		log.Printf("Error deleting user: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to delete user: %v", err)
+	}
+
+	log.Printf("Deleted (soft) user: %s", req.UserId)
+
+	return &pb.DeleteUserResponse{
+		Success: true,
+		Message: "User deleted successfully",
+	}, nil
 }
 
-func (us *UserService) userSearchHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "GET" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+func (s *UserService) SearchUsers(ctx context.Context, req *pb.SearchUsersRequest) (*pb.SearchUsersResponse, error) {
+	var users []models.User
+	searchTerm := "%" + req.SearchTerm + "%"
+
+	if err := database.DB.Where("username LIKE ? OR email LIKE ? OR full_name LIKE ?",
+		searchTerm, searchTerm, searchTerm).Find(&users).Error; err != nil {
+		log.Printf("Error searching users: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to search users: %v", err)
 	}
 
-	// Extraer término de búsqueda de la URL (/v2/users/search/{term})
-	searchTerm := strings.TrimPrefix(r.URL.Path, "/v2/users/search/")
-	searchTerm = strings.ToLower(searchTerm)
-
-	if searchTerm == "" {
-		http.Error(w, "Search term is required", http.StatusBadRequest)
-		return
+	var pbUsers []*pb.User
+	for _, user := range users {
+		pbUsers = append(pbUsers, &pb.User{
+			Id:        user.ID,
+			Username:  user.Username,
+			Email:     user.Email,
+			FullName:  user.FullName,
+			CreatedAt: timestamppb.New(user.CreatedAt),
+			Active:    user.Active,
+		})
 	}
 
-	var matchingUsers []models.User
-	for _, user := range us.users {
-		if strings.Contains(strings.ToLower(user.Username), searchTerm) ||
-			strings.Contains(strings.ToLower(user.Email), searchTerm) ||
-			strings.Contains(strings.ToLower(user.FullName), searchTerm) {
-			matchingUsers = append(matchingUsers, user)
-		}
+	return &pb.SearchUsersResponse{
+		Users:      pbUsers,
+		Total:      int32(len(pbUsers)),
+		SearchTerm: req.SearchTerm,
+	}, nil
+}
+
+func (s *UserService) GetUserByUsername(ctx context.Context, req *pb.GetUserByUsernameRequest) (*pb.GetUserByUsernameResponse, error) {
+	var user models.User
+	if err := database.DB.Where("username = ?", req.Username).First(&user).Error; err != nil {
+		return nil, status.Errorf(codes.NotFound, "user not found with username: %s", req.Username)
 	}
 
-	response := map[string]interface{}{
-		"users":      matchingUsers,
-		"total":      len(matchingUsers),
-		"searchTerm": searchTerm,
+	return &pb.GetUserByUsernameResponse{
+		User: &pb.User{
+			Id:        user.ID,
+			Username:  user.Username,
+			Email:     user.Email,
+			FullName:  user.FullName,
+			CreatedAt: timestamppb.New(user.CreatedAt),
+			Active:    user.Active,
+		},
+	}, nil
+}
+
+func (s *UserService) GetUserByEmail(ctx context.Context, req *pb.GetUserByEmailRequest) (*pb.GetUserByEmailResponse, error) {
+	var user models.User
+	if err := database.DB.Where("email = ?", req.Email).First(&user).Error; err != nil {
+		return nil, status.Errorf(codes.NotFound, "user not found with email: %s", req.Email)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	return &pb.GetUserByEmailResponse{
+		User: &pb.User{
+			Id:        user.ID,
+			Username:  user.Username,
+			Email:     user.Email,
+			FullName:  user.FullName,
+			CreatedAt: timestamppb.New(user.CreatedAt),
+			Active:    user.Active,
+		},
+	}, nil
+}
+
+// ========================================
+// Helper Functions
+// ========================================
+
+func generateUserID() string {
+	// Generar ID único basado en timestamp
+	var count int64
+	database.DB.Model(&models.User{}).Count(&count)
+	return fmt.Sprintf("user_%d", count+1)
 }

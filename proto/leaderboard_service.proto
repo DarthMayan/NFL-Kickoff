@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+package proto;
+
+option go_package = "kickoff.com/proto;proto";
+
+import "google/protobuf/timestamp.proto";
+
+// ========================================
+// MESSAGES - Core Entities
+// ========================================
+
+message UserScore {
+  string user_id = 1;
+  int32 correct_picks = 2;
+  int32 total_picks = 3;
+  double percentage = 4;
+  int32 rank = 5;
+}
+
+message PredictionDetail {
+  string game_id = 1;
+  string predicted_winner = 2;
+  google.protobuf.Timestamp created_at = 3;
+  string actual_winner = 4;
+  bool correct = 5;
+  string game_status = 6; // "pending", "finished"
+}
+
+// ========================================
+// MESSAGES - Requests & Responses
+// ========================================
+
+// GetLeaderboard
+message GetLeaderboardRequest {
+  int32 limit = 1;       // Optional: limit number of results
+  int32 offset = 2;      // Optional: pagination offset
+}
+
+message GetLeaderboardResponse {
+  repeated UserScore leaderboard = 1;
+  int32 total_users = 2;
+  int32 games_finished = 3;
+}
+
+// GetUserStats
+message GetUserStatsRequest {
+  string user_id = 1;
+}
+
+message GetUserStatsResponse {
+  UserScore user_stats = 1;
+  repeated PredictionDetail predictions = 2;
+  int32 total_predictions = 3;
+}
+
+// GetTopUsers
+message GetTopUsersRequest {
+  int32 top_n = 1; // Get top N users (e.g., top 10)
+}
+
+message GetTopUsersResponse {
+  repeated UserScore top_users = 1;
+  int32 total = 2;
+}
+
+// GetUserRank
+message GetUserRankRequest {
+  string user_id = 1;
+}
+
+message GetUserRankResponse {
+  UserScore user_score = 1;
+  int32 rank = 2;
+  int32 total_users = 3;
+}
+
+// RecalculateLeaderboard (Admin operation)
+message RecalculateLeaderboardRequest {
+  // Empty for now
+}
+
+message RecalculateLeaderboardResponse {
+  string message = 1;
+  int32 users_processed = 2;
+  int32 games_evaluated = 3;
+}
+
+// ========================================
+// SERVICE DEFINITION
+// ========================================
+
+service LeaderboardService {
+  // Get full leaderboard
+  rpc GetLeaderboard(GetLeaderboardRequest) returns (GetLeaderboardResponse);
+
+  // Get user statistics and predictions
+  rpc GetUserStats(GetUserStatsRequest) returns (GetUserStatsResponse);
+
+  // Get top N users
+  rpc GetTopUsers(GetTopUsersRequest) returns (GetTopUsersResponse);
+
+  // Get user rank
+  rpc GetUserRank(GetUserRankRequest) returns (GetUserRankResponse);
+
+  // Recalculate leaderboard (admin/internal)
+  rpc RecalculateLeaderboard(RecalculateLeaderboardRequest) returns (RecalculateLeaderboardResponse);
+}

@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: game-service
+  namespace: kickoff
+  labels:
+    app: game
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: game
+  template:
+    metadata:
+      labels:
+        app: game
+        tier: backend
+    spec:
+      containers:
+      - name: game
+        image: kickoff-game-service:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 9082
+          name: grpc
+          protocol: TCP
+        env:
+        - name: DB_NAME
+          value: "game_db"
+        envFrom:
+        - configMapRef:
+            name: postgres-config
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        livenessProbe:
+          grpc:
+            port: 9082
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          grpc:
+            port: 9082
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3

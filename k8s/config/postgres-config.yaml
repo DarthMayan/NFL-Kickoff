@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-config
+  namespace: kickoff
+data:
+  POSTGRES_USER: kickoff_user
+  POSTGRES_PASSWORD: kickoff_password_123
+  DB_HOST: postgres-service
+  DB_PORT: "5432"
+  DB_USER: kickoff_user
+  DB_PASSWORD: kickoff_password_123

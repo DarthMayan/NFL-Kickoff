@@ -30,8 +30,8 @@ WORKDIR /root/
 # Copiar el binario compilado
 COPY --from=builder /app/main .
 
-# Exponer puerto 8084
-EXPOSE 8084
+# Exponer puerto gRPC
+EXPOSE 9084
 
 # Comando para ejecutar el servicio
-CMD ["./main"]
+CMD ["./main", "-grpc-port=9084"]

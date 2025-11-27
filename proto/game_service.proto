@@ -1,0 +1,223 @@
+syntax = "proto3";
+
+package proto;
+
+option go_package = "kickoff.com/proto;proto";
+
+import "google/protobuf/timestamp.proto";
+
+// ========================================
+// ENUMS
+// ========================================
+
+enum Conference {
+  CONFERENCE_UNSPECIFIED = 0;
+  CONFERENCE_AFC = 1;
+  CONFERENCE_NFC = 2;
+}
+
+enum Division {
+  DIVISION_UNSPECIFIED = 0;
+  DIVISION_AFC_EAST = 1;
+  DIVISION_AFC_NORTH = 2;
+  DIVISION_AFC_SOUTH = 3;
+  DIVISION_AFC_WEST = 4;
+  DIVISION_NFC_EAST = 5;
+  DIVISION_NFC_NORTH = 6;
+  DIVISION_NFC_SOUTH = 7;
+  DIVISION_NFC_WEST = 8;
+}
+
+enum GameStatus {
+  GAME_STATUS_UNSPECIFIED = 0;
+  GAME_STATUS_SCHEDULED = 1;
+  GAME_STATUS_IN_PROGRESS = 2;
+  GAME_STATUS_COMPLETED = 3;
+  GAME_STATUS_POSTPONED = 4;
+  GAME_STATUS_CANCELED = 5;
+}
+
+// ========================================
+// MESSAGES - Core Entities
+// ========================================
+
+message Team {
+  string id = 1;
+  string name = 2;
+  string city = 3;
+  string abbreviation = 4;
+  Conference conference = 5;
+  Division division = 6;
+  string logo_url = 7;
+  string stadium = 8;
+}
+
+message Game {
+  string id = 1;
+  string home_team_id = 2;
+  string away_team_id = 3;
+  int32 week = 4;
+  GameStatus status = 5;
+  int32 home_score = 6;
+  int32 away_score = 7;
+  google.protobuf.Timestamp scheduled_at = 8;
+  google.protobuf.Timestamp started_at = 9;
+  google.protobuf.Timestamp completed_at = 10;
+}
+
+// ========================================
+// MESSAGES - Requests & Responses
+// ========================================
+
+// GetAllTeams
+message GetAllTeamsRequest {
+  // Empty for now, can add pagination later
+}
+
+message GetAllTeamsResponse {
+  repeated Team teams = 1;
+  int32 total = 2;
+}
+
+// GetTeamByID
+message GetTeamByIDRequest {
+  string team_id = 1;
+}
+
+message GetTeamByIDResponse {
+  Team team = 1;
+}
+
+// GetTeamsByConference
+message GetTeamsByConferenceRequest {
+  Conference conference = 1;
+}
+
+message GetTeamsByConferenceResponse {
+  repeated Team teams = 1;
+  int32 total = 2;
+  Conference conference = 3;
+}
+
+// GetTeamsByDivision
+message GetTeamsByDivisionRequest {
+  Division division = 1;
+}
+
+message GetTeamsByDivisionResponse {
+  repeated Team teams = 1;
+  int32 total = 2;
+  Division division = 3;
+}
+
+// GetAllGames
+message GetAllGamesRequest {
+  // Empty for now, can add filters later
+}
+
+message GetAllGamesResponse {
+  repeated Game games = 1;
+  int32 total = 2;
+}
+
+// GetGameByID
+message GetGameByIDRequest {
+  string game_id = 1;
+}
+
+message GetGameByIDResponse {
+  Game game = 1;
+}
+
+// GetGamesByWeek
+message GetGamesByWeekRequest {
+  int32 week = 1;
+}
+
+message GetGamesByWeekResponse {
+  repeated Game games = 1;
+  int32 total = 2;
+  int32 week = 3;
+}
+
+// GetGamesByTeam
+message GetGamesByTeamRequest {
+  string team_id = 1;
+}
+
+message GetGamesByTeamResponse {
+  repeated Game games = 1;
+  int32 total = 2;
+  string team_id = 3;
+}
+
+// GetGamesByStatus
+message GetGamesByStatusRequest {
+  GameStatus status = 1;
+}
+
+message GetGamesByStatusResponse {
+  repeated Game games = 1;
+  int32 total = 2;
+  GameStatus status = 3;
+}
+
+// CreateGame (for admin/testing)
+message CreateGameRequest {
+  string home_team_id = 1;
+  string away_team_id = 2;
+  int32 week = 3;
+  google.protobuf.Timestamp scheduled_at = 4;
+}
+
+message CreateGameResponse {
+  Game game = 1;
+  string message = 2;
+}
+
+// UpdateGameScore
+message UpdateGameScoreRequest {
+  string game_id = 1;
+  int32 home_score = 2;
+  int32 away_score = 3;
+}
+
+message UpdateGameScoreResponse {
+  Game game = 1;
+  string message = 2;
+}
+
+// UpdateGameStatus
+message UpdateGameStatusRequest {
+  string game_id = 1;
+  GameStatus status = 2;
+}
+
+message UpdateGameStatusResponse {
+  Game game = 1;
+  string message = 2;
+}
+
+// ========================================
+// SERVICE DEFINITION
+// ========================================
+
+service GameService {
+  // Team operations
+  rpc GetAllTeams(GetAllTeamsRequest) returns (GetAllTeamsResponse);
+  rpc GetTeamByID(GetTeamByIDRequest) returns (GetTeamByIDResponse);
+  rpc GetTeamsByConference(GetTeamsByConferenceRequest) returns (GetTeamsByConferenceResponse);
+  rpc GetTeamsByDivision(GetTeamsByDivisionRequest) returns (GetTeamsByDivisionResponse);
+
+  // Game operations
+  rpc GetAllGames(GetAllGamesRequest) returns (GetAllGamesResponse);
+  rpc GetGameByID(GetGameByIDRequest) returns (GetGameByIDResponse);
+  rpc GetGamesByWeek(GetGamesByWeekRequest) returns (GetGamesByWeekResponse);
+  rpc GetGamesByTeam(GetGamesByTeamRequest) returns (GetGamesByTeamResponse);
+  rpc GetGamesByStatus(GetGamesByStatusRequest) returns (GetGamesByStatusResponse);
+
+  // Game management (admin/internal)
+  rpc CreateGame(CreateGameRequest) returns (CreateGameResponse);
+  rpc UpdateGameScore(UpdateGameScoreRequest) returns (UpdateGameScoreResponse);
+  rpc UpdateGameStatus(UpdateGameStatusRequest) returns (UpdateGameStatusResponse);
+}

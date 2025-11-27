@@ -1,185 +1,360 @@
-# 🏈 Kickoff - NFL Prediction Game
+# Kickoff - Sistema de Predicciones NFL
 
-Una aplicación de microservicios distribuidos para predicciones NFL con Go, Docker y Consul.
+Sistema de microservicios para predicciones de juegos de la NFL, implementado con Kubernetes, gRPC y PostgreSQL.
 
-## 🐳 **SOLO DOCKER** - Ejecución Simplificada
+## 📋 Arquitectura del Proyecto
 
-### ✅ Iniciar Proyecto Completo:
+### Microservicios
+1. **Gateway Service** - API HTTP que expone endpoints REST (LoadBalancer)
+2. **User Service** - Gestión de usuarios (ClusterIP)
+3. **Game Service** - Gestión de equipos y juegos NFL (ClusterIP)
+4. **Prediction Service** - Gestión de predicciones (ClusterIP)
+5. **Leaderboard Service** - Rankings y estadísticas (ClusterIP)
+
+### Base de Datos
+- **PostgreSQL** - Con bases de datos separadas por servicio:
+  - `user_db` - User Service
+  - `game_db` - Game Service
+  - `prediction_db` - Prediction Service
+  - `leaderboard_db` - Leaderboard Service
+
+### Comunicación
+- **Frontend → Gateway**: HTTP/REST
+- **Gateway → Services**: gRPC
+- **Services → PostgreSQL**: SQL via GORM
+
+## 🔧 Requisitos Cumplidos
+
+✅ Clúster de Kubernetes con mínimo 3 microservicios comunicados via gRPC
+✅ Un microservicio expuesto al exterior vía LoadBalancer (Gateway)
+✅ Microservicios internos comunicados por ClusterIP
+✅ Base de datos PostgreSQL con Service tipo ClusterIP
+✅ Cada servicio con su propia base de datos
+
+## 🚀 Deployment en Kind (Kubernetes in Docker)
+
+### 1. Crear el Cluster Kind
+
 ```bash
-./start-project.bat
+# Crear cluster con configuración especial para LoadBalancer
+kind create cluster --name kickoff --config kind-config.yaml
 ```
 
-### ⛔ Detener Proyecto:
+### 2. Construir Imágenes Docker
+
 ```bash
-./stop-project.bat
+# Construir imágenes de todos los servicios
+docker build -t kickoff-gateway-service:latest -f gateway/Dockerfile .
+docker build -t kickoff-user-service:latest -f user/Dockerfile .
+docker build -t kickoff-game-service:latest -f game/Dockerfile .
+docker build -t kickoff-prediction-service:latest -f prediction/Dockerfile .
+docker build -t kickoff-leaderboard-service:latest -f leaderboard/Dockerfile .
 ```
 
-## 🏗️ Arquitectura de Microservicios
-
-- **Consul** (Puerto 8500) - Service Discovery y Health Checks
-- **Gateway** (Puerto 8080) - API Gateway principal
-- **User Service** (Puerto 8081) - Gestión de usuarios
-- **Game Service** (Puerto 8082) - Equipos y juegos NFL
-- **Prediction Service** (Puerto 8083) - Predicciones de usuarios
-- **Leaderboard Service** (Puerto 8084) - Rankings y estadísticas
-
-## 📋 Requisitos
-
-- **Docker Desktop** (único requisito)
-- Git
-
-## 🚀 Configuración Instantánea
+### 3. Cargar Imágenes en Kind
 
 ```bash
-git clone <repository-url>
-cd kickoff
-./start-project.bat
+# Cargar imágenes al cluster de Kind
+kind load docker-image kickoff-gateway-service:latest --name kickoff
+kind load docker-image kickoff-user-service:latest --name kickoff
+kind load docker-image kickoff-game-service:latest --name kickoff
+kind load docker-image kickoff-prediction-service:latest --name kickoff
+kind load docker-image kickoff-leaderboard-service:latest --name kickoff
 ```
 
-**¡Listo!** Todos los servicios se ejecutan automáticamente.
-
-## 🔗 URLs Principales
-
-### Interfaces Web:
-- **Consul UI**: http://localhost:8500 (Service Discovery)
-- **Gateway**: http://localhost:8080/health (API Gateway principal)
-
-### Health Checks:
-- **Gateway**: http://localhost:8080/health
-- **User Service**: http://localhost:8081/health
-- **Game Service**: http://localhost:8082/health
-- **Prediction Service**: http://localhost:8083/health
-- **Leaderboard Service**: http://localhost:8084/health
-
-### APIs a través del Gateway (Recomendado):
-- **Usuarios**: http://localhost:8080/api/users
-- **Equipos NFL**: http://localhost:8080/api/teams
-- **Juegos NFL**: http://localhost:8080/api/games
-- **Predicciones**: http://localhost:8080/api/predictions
-- **Leaderboard**: http://localhost:8080/api/leaderboard
-- **Estadísticas Usuario**: http://localhost:8080/api/user-stats/{userID}
-- **Predicciones Usuario**: http://localhost:8080/api/predictions/user/{userID}
-
-### APIs Directas (Servicios individuales):
-- **Usuarios**: http://localhost:8081/v2/users
-- **Equipos NFL**: http://localhost:8082/v2/teams
-- **Predicciones**: http://localhost:8083/v2/predictions
-
-## 📖 Uso de APIs
-
-### 🌐 A través del Gateway (Recomendado):
-
-#### 1. Ver usuarios:
+O usar el script:
 ```bash
-curl http://localhost:8080/api/users
+./load-images-to-kind.bat
 ```
 
-#### 2. Ver equipos NFL:
+### 4. Desplegar en Kubernetes
+
 ```bash
+# Crear namespace
+kubectl apply -f k8s/base/namespace.yaml
+
+# Aplicar ConfigMaps y configuración
+kubectl apply -f k8s/config/
+
+# Crear PersistentVolumeClaim para PostgreSQL
+kubectl apply -f k8s/base/postgres-pvc.yaml
+
+# Desplegar servicios
+kubectl apply -f k8s/deployments/
+kubectl apply -f k8s/services/
+```
+
+O usar el Makefile:
+```bash
+make deploy
+```
+
+### 5. Verificar Deployment
+
+```bash
+# Ver estado de los pods
+kubectl get pods -n kickoff
+
+# Ver servicios
+kubectl get services -n kickoff
+
+# Ver logs del Gateway
+kubectl logs -n kickoff -l app=gateway
+
+# Ver logs de PostgreSQL
+kubectl logs -n kickoff -l app=postgres
+```
+
+### 6. Acceder al Frontend
+
+El frontend se encuentra en `frontend/gateway-client/index.html`. Simplemente ábrelo en un navegador.
+
+**URL del Gateway**: `http://localhost:8080`
+
+Kind mapea el LoadBalancer del Gateway al puerto 8080 del host (configurado en `kind-config.yaml`).
+
+## 📁 Estructura del Proyecto
+
+```
+kickoff/
+├── gateway/              # API Gateway (HTTP → gRPC)
+│   ├── cmd/main/
+│   └── Dockerfile
+├── user/                 # Servicio de Usuarios
+│   ├── cmd/main/
+│   ├── internal/
+│   │   ├── models/      # Modelos GORM
+│   │   └── database/    # Conexión DB
+│   └── Dockerfile
+├── game/                 # Servicio de Juegos
+│   ├── cmd/main/
+│   ├── internal/
+│   │   ├── models/
+│   │   ├── database/
+│   │   └── data/        # Datos NFL
+│   └── Dockerfile
+├── prediction/           # Servicio de Predicciones
+│   ├── cmd/main/
+│   ├── internal/
+│   │   ├── models/
+│   │   └── database/
+│   └── Dockerfile
+├── leaderboard/          # Servicio de Leaderboard
+│   ├── cmd/main/
+│   ├── internal/
+│   │   ├── models/
+│   │   └── database/
+│   └── Dockerfile
+├── proto/                # Definiciones gRPC
+├── k8s/                  # Manifiestos Kubernetes
+│   ├── base/            # Namespace, PVC
+│   ├── config/          # ConfigMaps
+│   ├── deployments/     # Deployments
+│   └── services/        # Services
+├── frontend/            # Cliente web
+│   └── gateway-client/
+├── db/                  # Scripts SQL
+└── kind-config.yaml     # Configuración Kind
+```
+
+## 🛠️ Comandos Útiles
+
+### Desarrollo
+
+```bash
+# Regenerar código gRPC
+./generate-proto.bat
+
+# Compilar un servicio localmente
+cd user && go build -o user.exe ./cmd/main
+
+# Ejecutar tests
+go test ./...
+```
+
+### Kubernetes
+
+```bash
+# Port-forward para acceder a PostgreSQL directamente
+kubectl port-forward -n kickoff service/postgres-service 5432:5432
+
+# Port-forward para acceder al Gateway
+kubectl port-forward -n kickoff service/gateway-service 8080:8080
+
+# Reiniciar un deployment
+kubectl rollout restart -n kickoff deployment/user-service
+
+# Ver eventos
+kubectl get events -n kickoff --sort-by='.lastTimestamp'
+
+# Ejecutar shell en un pod
+kubectl exec -it -n kickoff <pod-name> -- /bin/sh
+
+# Ver logs en tiempo real
+kubectl logs -f -n kickoff <pod-name>
+```
+
+### Limpieza
+
+```bash
+# Eliminar todos los recursos del namespace
+kubectl delete namespace kickoff
+
+# O usar el Makefile
+make clean
+
+# Eliminar el cluster Kind
+kind delete cluster --name kickoff
+```
+
+## 🔍 Testing
+
+### Probar Endpoints del Gateway
+
+```bash
+# Health check
+curl http://localhost:8080/health
+
+# Obtener equipos
 curl http://localhost:8080/api/teams
-```
 
-#### 3. Ver juegos NFL:
-```bash
+# Obtener juegos
 curl http://localhost:8080/api/games
-```
 
-#### 4. Ver predicciones:
-```bash
+# Obtener usuarios
+curl http://localhost:8080/api/users
+
+# Obtener predicciones
 curl http://localhost:8080/api/predictions
-```
 
-#### 5. Ver leaderboard:
-```bash
+# Obtener leaderboard
 curl http://localhost:8080/api/leaderboard
 ```
 
-#### 6. Ver estadísticas de usuario específico:
+### Load Testing
+
+Se incluyen scripts de pruebas de carga con k6:
+
 ```bash
-curl http://localhost:8080/api/user-stats/user_1
+# Test de carga básico
+k6 run k6-load-test.js
+
+# Test de estrés
+k6 run k6-stress-test.js
 ```
 
-#### 7. Ver predicciones de usuario específico:
+## 📊 Monitoreo
+
+### Ver Métricas de los Pods
+
 ```bash
-curl http://localhost:8080/api/predictions/user/user_1
+# Uso de CPU y memoria
+kubectl top pods -n kickoff
+
+# Uso de nodos
+kubectl top nodes
 ```
 
-### 🔧 Directamente a servicios individuales:
+### HPA (Horizontal Pod Autoscaler)
 
-#### 1. Crear usuario:
+El proyecto incluye configuración de HPA para escalar automáticamente:
+
 ```bash
-curl -X POST http://localhost:8081/v2/users \
-  -H "Content-Type: application/json" \
-  -d '{"username": "john_doe", "email": "john@example.com", "fullName": "John Doe"}'
+# Ver HPA
+kubectl get hpa -n kickoff
+
+# Detalles del HPA
+kubectl describe hpa <hpa-name> -n kickoff
 ```
 
-#### 2. Ver equipos:
+## 🐛 Troubleshooting
+
+### Los pods no arrancan
+
 ```bash
-curl http://localhost:8082/v2/teams
+# Ver detalles del pod
+kubectl describe pod -n kickoff <pod-name>
+
+# Ver logs
+kubectl logs -n kickoff <pod-name>
+
+# Ver eventos
+kubectl get events -n kickoff
 ```
 
-#### 3. Crear predicción:
+### PostgreSQL no está listo
+
 ```bash
-curl -X POST http://localhost:8083/v2/predictions \
-  -H "Content-Type: application/json" \
-  -d '{"userId": "user_1", "gameId": "1", "predictedWinnerId": "KC"}'
+# Verificar que el PVC está bound
+kubectl get pvc -n kickoff
+
+# Ver logs de PostgreSQL
+kubectl logs -n kickoff -l app=postgres
+
+# Verificar que las bases de datos se crearon
+kubectl exec -it -n kickoff <postgres-pod> -- psql -U kickoff_user -c "\l"
 ```
 
-## 🛠️ Monitoreo
+### Gateway no puede conectarse a los servicios
 
-- **Estado servicios**: `docker-compose ps`
-- **Logs en tiempo real**: `docker-compose logs -f`
-- **Logs servicio específico**: `docker-compose logs -f user-service`
-
-## 🏗️ Arquitectura Técnica
-
-- **Lenguaje**: Go
-- **Service Discovery**: Consul
-- **Contenedores**: Docker + Docker Compose
-- **Comunicación**: APIs REST
-- **Patrones**: Microservicios, Clean Architecture
-- **Storage**: In-memory (desarrollo)
-
-## ⚠️ Solución de Problemas
-
-### Error de puerto en uso:
 ```bash
-# Verificar qué está usando los puertos
-netstat -an | findstr ":8500"
-netstat -an | findstr ":8080"
+# Verificar que los servicios existen
+kubectl get services -n kickoff
 
-# Detener todos los contenedores
-docker-compose down --volumes --remove-orphans
+# Probar resolución DNS desde un pod
+kubectl exec -it -n kickoff <gateway-pod> -- nslookup user-service
+
+# Verificar que los puertos son correctos
+kubectl describe service user-service -n kickoff
 ```
 
-### Los servicios no inician:
-```bash
-# Ver logs de servicios
-docker-compose logs consul
-docker-compose logs user-service
+### Frontend no se conecta
 
-# Limpiar y reconstruir
-docker-compose down --volumes --remove-orphans
-docker-compose up --build -d
-```
+1. Verificar que Kind está corriendo: `kind get clusters`
+2. Verificar que el Gateway tiene LoadBalancer: `kubectl get svc -n kickoff gateway-service`
+3. Verificar mapping de puertos en `kind-config.yaml`
+4. Abrir DevTools del navegador y verificar errores de CORS o red
 
-### Comandos útiles:
-```bash
-# Ver estado de servicios
-docker-compose ps
+## 📝 Notas Importantes
 
-# Ver logs en tiempo real
-docker-compose logs -f
+### ⚠️ Estado Actual del Proyecto
 
-# Parar todo y limpiar
-./stop-project.bat
-```
+**Los servicios actualmente usan almacenamiento en memoria** (maps). Para usar PostgreSQL con GORM:
 
-## 📚 Scripts Incluidos
+1. Cada servicio necesita actualizar su `main.go` para:
+   - Importar `internal/database` e `internal/models`
+   - Llamar a `database.Connect()` al iniciar
+   - Reemplazar operaciones con maps por GORM queries
 
-- `start-project.bat`: Inicia todo el proyecto automáticamente
-- `stop-project.bat`: Detiene y limpia todos los contenedores
+2. Ver `MIGRATION_STATUS.md` para detalles de la migración a GORM
 
----
+3. Los modelos y la capa de base de datos ya están creados en cada servicio
 
-**✅ Proyecto optimizado para desarrollo y aprendizaje de sistemas distribuidos con Docker.**
+### Para Producción
+
+- Usar Secrets en lugar de ConfigMaps para passwords
+- Habilitar SSL/TLS para gRPC
+- Implementar autenticación y autorización
+- Configurar backups de PostgreSQL
+- Usar un servicio de Load Balancer real (no Kind)
+- Implementar observabilidad (Prometheus, Grafana, Jaeger)
+
+## 👥 Contribuir
+
+1. Fork el proyecto
+2. Crea una rama para tu feature (`git checkout -b feature/AmazingFeature`)
+3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
+4. Push a la rama (`git push origin feature/AmazingFeature`)
+5. Abre un Pull Request
+
+## 📄 Licencia
+
+Este proyecto es parte de un trabajo académico para el curso de Computación Distribuida.
+
+## 🙏 Agradecimientos
+
+- Kubernetes
+- gRPC
+- GORM
+- PostgreSQL
+- Kind (Kubernetes in Docker)

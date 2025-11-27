@@ -1,0 +1,140 @@
+syntax = "proto3";
+
+package proto;
+
+option go_package = "kickoff.com/proto;proto";
+
+import "google/protobuf/timestamp.proto";
+
+// ========================================
+// MESSAGES - Core Entities
+// ========================================
+
+message User {
+  string id = 1;
+  string username = 2;
+  string email = 3;
+  string full_name = 4;
+  google.protobuf.Timestamp created_at = 5;
+  bool active = 6;
+}
+
+// ========================================
+// MESSAGES - Requests & Responses
+// ========================================
+
+// CreateUser
+message CreateUserRequest {
+  string username = 1;
+  string email = 2;
+  string full_name = 3;
+}
+
+message CreateUserResponse {
+  User user = 1;
+  string message = 2;
+}
+
+// GetUserByID
+message GetUserByIDRequest {
+  string user_id = 1;
+}
+
+message GetUserByIDResponse {
+  User user = 1;
+}
+
+// GetAllUsers
+message GetAllUsersRequest {
+  int32 page = 1;
+  int32 page_size = 2;
+  bool active_only = 3;
+}
+
+message GetAllUsersResponse {
+  repeated User users = 1;
+  int32 total = 2;
+}
+
+// UpdateUser
+message UpdateUserRequest {
+  string user_id = 1;
+  string username = 2;
+  string email = 3;
+  string full_name = 4;
+  optional bool active = 5;
+}
+
+message UpdateUserResponse {
+  User user = 1;
+  string message = 2;
+}
+
+// DeleteUser (soft delete)
+message DeleteUserRequest {
+  string user_id = 1;
+}
+
+message DeleteUserResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// SearchUsers
+message SearchUsersRequest {
+  string search_term = 1;
+}
+
+message SearchUsersResponse {
+  repeated User users = 1;
+  int32 total = 2;
+  string search_term = 3;
+}
+
+// GetUserByUsername
+message GetUserByUsernameRequest {
+  string username = 1;
+}
+
+message GetUserByUsernameResponse {
+  User user = 1;
+}
+
+// GetUserByEmail
+message GetUserByEmailRequest {
+  string email = 1;
+}
+
+message GetUserByEmailResponse {
+  User user = 1;
+}
+
+// ========================================
+// SERVICE DEFINITION
+// ========================================
+
+service UserService {
+  // Create a new user
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+
+  // Get user by ID
+  rpc GetUserByID(GetUserByIDRequest) returns (GetUserByIDResponse);
+
+  // Get all users
+  rpc GetAllUsers(GetAllUsersRequest) returns (GetAllUsersResponse);
+
+  // Update user
+  rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
+
+  // Delete user (soft delete - marks as inactive)
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+
+  // Search users by username, email or full name
+  rpc SearchUsers(SearchUsersRequest) returns (SearchUsersResponse);
+
+  // Get user by username (for authentication/lookup)
+  rpc GetUserByUsername(GetUserByUsernameRequest) returns (GetUserByUsernameResponse);
+
+  // Get user by email (for authentication/lookup)
+  rpc GetUserByEmail(GetUserByEmailRequest) returns (GetUserByEmailResponse);
+}

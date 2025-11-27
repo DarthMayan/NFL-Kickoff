@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kickoff-config
+  namespace: kickoff
+  labels:
+    app: kickoff
+data:
+  # Service endpoints (Kubernetes DNS)
+  USER_SERVICE_HOST: "user-service"
+  USER_SERVICE_PORT: "9081"
+  GAME_SERVICE_HOST: "game-service"
+  GAME_SERVICE_PORT: "9082"
+  PREDICTION_SERVICE_HOST: "prediction-service"
+  PREDICTION_SERVICE_PORT: "9083"
+  LEADERBOARD_SERVICE_HOST: "leaderboard-service"
+  LEADERBOARD_SERVICE_PORT: "9084"
+
+  # Application settings
+  LOG_LEVEL: "info"
+  ENVIRONMENT: "docker-desktop"

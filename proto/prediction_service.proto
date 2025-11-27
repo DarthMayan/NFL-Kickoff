@@ -1,0 +1,152 @@
+syntax = "proto3";
+
+package proto;
+
+option go_package = "kickoff.com/proto;proto";
+
+import "google/protobuf/timestamp.proto";
+
+// ========================================
+// ENUMS
+// ========================================
+
+enum PredictionStatus {
+  PREDICTION_STATUS_UNSPECIFIED = 0;
+  PREDICTION_STATUS_PENDING = 1;      // Game hasn't started
+  PREDICTION_STATUS_CORRECT = 2;      // Prediction was right
+  PREDICTION_STATUS_INCORRECT = 3;    // Prediction was wrong
+  PREDICTION_STATUS_VOID = 4;         // Game was canceled/postponed
+}
+
+// ========================================
+// MESSAGES - Core Entities
+// ========================================
+
+message Prediction {
+  string id = 1;
+  string user_id = 2;
+  string game_id = 3;
+  string predicted_winner_id = 4;
+  PredictionStatus status = 5;
+  int32 points = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+// ========================================
+// MESSAGES - Requests
+// ========================================
+
+message CreatePredictionRequest {
+  string user_id = 1;
+  string game_id = 2;
+  string predicted_winner_id = 3;
+}
+
+message CreatePredictionResponse {
+  Prediction prediction = 1;
+  string message = 2;
+}
+
+message GetPredictionByIDRequest {
+  string prediction_id = 1;
+}
+
+message GetPredictionByIDResponse {
+  Prediction prediction = 1;
+}
+
+message GetUserPredictionsRequest {
+  string user_id = 1;
+}
+
+message GetUserPredictionsResponse {
+  string user_id = 1;
+  repeated Prediction predictions = 2;
+  int32 total = 3;
+  int32 correct = 4;
+  int32 incorrect = 5;
+  int32 pending = 6;
+  double percentage = 7;
+}
+
+message GetGamePredictionsRequest {
+  string game_id = 1;
+}
+
+message GetGamePredictionsResponse {
+  string game_id = 1;
+  repeated Prediction predictions = 2;
+  int32 total = 3;
+}
+
+message GetWeekPredictionsRequest {
+  string week = 1;
+}
+
+message GetWeekPredictionsResponse {
+  string week = 1;
+  repeated Prediction predictions = 2;
+  int32 total = 3;
+}
+
+message GetAllPredictionsRequest {
+  // Empty for now, can add pagination later
+  int32 page = 1;
+  int32 page_size = 2;
+}
+
+message GetAllPredictionsResponse {
+  repeated Prediction predictions = 1;
+  int32 total = 2;
+}
+
+message DeletePredictionRequest {
+  string prediction_id = 1;
+}
+
+message DeletePredictionResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message UpdatePredictionStatusRequest {
+  string prediction_id = 1;
+  PredictionStatus status = 2;
+  int32 points = 3;
+}
+
+message UpdatePredictionStatusResponse {
+  Prediction prediction = 1;
+  string message = 2;
+}
+
+// ========================================
+// SERVICE DEFINITION
+// ========================================
+
+service PredictionService {
+  // Create a new prediction
+  rpc CreatePrediction(CreatePredictionRequest) returns (CreatePredictionResponse);
+
+  // Get prediction by ID
+  rpc GetPredictionByID(GetPredictionByIDRequest) returns (GetPredictionByIDResponse);
+
+  // Get all predictions for a user
+  rpc GetUserPredictions(GetUserPredictionsRequest) returns (GetUserPredictionsResponse);
+
+  // Get all predictions for a game
+  rpc GetGamePredictions(GetGamePredictionsRequest) returns (GetGamePredictionsResponse);
+
+  // Get all predictions for a week
+  rpc GetWeekPredictions(GetWeekPredictionsRequest) returns (GetWeekPredictionsResponse);
+
+  // Get all predictions (for admin/debugging)
+  rpc GetAllPredictions(GetAllPredictionsRequest) returns (GetAllPredictionsResponse);
+
+  // Delete a prediction (only if pending)
+  rpc DeletePrediction(DeletePredictionRequest) returns (DeletePredictionResponse);
+
+  // Update prediction status (internal use - called when game finishes)
+  rpc UpdatePredictionStatus(UpdatePredictionStatusRequest) returns (UpdatePredictionStatusResponse);
+}

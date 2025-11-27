@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Kickoff - NFL Predictions</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+      color: #333;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    header {
+      background: rgba(255,255,255,0.95);
+      padding: 24px;
+      border-radius: 8px;
+      margin-bottom: 24px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    header h1 { font-size: 2em; margin-bottom: 8px; }
+    .status { display: flex; gap: 16px; align-items: center; margin-top: 12px; }
+    .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 20px; font-size: 0.9em; }
+    .status-ok { background: #d4edda; color: #155724; }
+    .status-err { background: #f8d7da; color: #721c24; }
+
+    .sections { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+    .section {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+    .section h2 { font-size: 1.4em; margin-bottom: 16px; color: #667eea; border-bottom: 2px solid #667eea; padding-bottom: 12px; }
+    .section-content { max-height: 500px; overflow-y: auto; }
+
+    .team-card, .game-card, .user-card, .pred-card {
+      background: #f8f9fa;
+      padding: 12px;
+      margin-bottom: 12px;
+      border-radius: 6px;
+      border-left: 4px solid #667eea;
+    }
+    .team-card h3, .game-card h3, .user-card h3, .pred-card h3 {
+      font-size: 1em;
+      margin-bottom: 6px;
+    }
+    .team-card p, .game-card p, .user-card p, .pred-card p {
+      font-size: 0.9em;
+      color: #666;
+      margin: 4px 0;
+    }
+
+    .game-status {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.85em;
+      font-weight: bold;
+    }
+    .status-scheduled { background: #cfe2ff; color: #084298; }
+    .status-live { background: #f8d7da; color: #842029; }
+    .status-completed { background: #d1e7dd; color: #0f5132; }
+
+    .loading { text-align: center; color: #999; font-style: italic; }
+    .error { background: #f8d7da; color: #721c24; padding: 12px; border-radius: 6px; margin-bottom: 12px; }
+
+    footer {
+      text-align: center;
+      color: white;
+      margin-top: 40px;
+      font-size: 0.9em;
+    }
+
+    @media (max-width: 768px) {
+      header h1 { font-size: 1.4em; }
+      .sections { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🏈 Kickoff - NFL Predictions</h1>
+      <div class="status">
+        <span>Gateway Status:</span>
+        <span class="status-pill status-err" id="healthStatus">Checking...</span>
+      </div>
+    </header>
+
+    <div class="sections">
+      <!-- Teams -->
+      <div class="section">
+        <h2>🏟️ Equipos (Teams)</h2>
+        <div class="section-content" id="teamsContainer">
+          <div class="loading">Cargando equipos...</div>
+        </div>
+      </div>
+
+      <!-- Games -->
+      <div class="section">
+        <h2>🎮 Juegos (Games)</h2>
+        <div class="section-content" id="gamesContainer">
+          <div class="loading">Cargando juegos...</div>
+        </div>
+      </div>
+
+      <!-- Users -->
+      <div class="section">
+        <h2>👥 Usuarios (Users)</h2>
+        <div class="section-content" id="usersContainer">
+          <div class="loading">Cargando usuarios...</div>
+        </div>
+      </div>
+
+      <!-- Leaderboard -->
+      <div class="section">
+        <h2>🏆 Leaderboard</h2>
+        <div class="section-content" id="leaderboardContainer">
+          <div class="loading">Cargando leaderboard...</div>
+        </div>
+      </div>
+
+      <!-- Predictions -->
+      <div class="section">
+        <h2>🔮 Predicciones (Predictions)</h2>
+        <div class="section-content" id="predictionsContainer">
+          <div class="loading">Cargando predicciones...</div>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="section">
+        <h2>📊 Información General</h2>
+        <div class="section-content" id="statsContainer">
+          <div class="loading">Cargando información...</div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      <p>Early version of Kickoff • Powered by gRPC Gateway</p>
+    </footer>
+  </div>
+
+  <script>
+    const API_BASE = 'http://localhost:8080'
+
+    async function apiCall(endpoint) {
+      try {
+        const res = await fetch(`${API_BASE}${endpoint}`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return await res.json()
+      } catch (err) {
+        console.error(`Error fetching ${endpoint}:`, err)
+        return null
+      }
+    }
+
+    async function checkHealth() {
+      const res = await fetch(`${API_BASE}/health`)
+      const statusEl = document.getElementById('healthStatus')
+      if (res.ok) {
+        statusEl.classList.remove('status-err')
+        statusEl.classList.add('status-ok')
+        statusEl.textContent = '✅ Online'
+      } else {
+        statusEl.classList.remove('status-ok')
+        statusEl.classList.add('status-err')
+        statusEl.textContent = '❌ Offline'
+      }
+    }
+
+    async function loadTeams() {
+      const data = await apiCall('/api/teams')
+      const el = document.getElementById('teamsContainer')
+      if (!data || !data.teams) {
+        el.innerHTML = '<div class="error">No se pudieron cargar los equipos</div>'
+        return
+      }
+      el.innerHTML = data.teams.slice(0, 8).map(t => `
+        <div class="team-card">
+          <h3>${t.name}</h3>
+          <p><strong>${t.abbreviation}</strong> • ${t.city}</p>
+          <p>${t.conference} - ${t.division}</p>
+          <p>${t.stadium}</p>
+        </div>
+      `).join('')
+    }
+
+    async function loadGames() {
+      const data = await apiCall('/api/games')
+      const el = document.getElementById('gamesContainer')
+      if (!data || !data.games) {
+        el.innerHTML = '<div class="error">No se pudieron cargar los juegos</div>'
+        return
+      }
+      el.innerHTML = data.games.slice(0, 6).map(g => {
+        const statusClass = g.status === 'GAME_STATUS_SCHEDULED' ? 'status-scheduled' : g.status === 'GAME_STATUS_IN_PROGRESS' ? 'status-live' : 'status-completed'
+        return `
+          <div class="game-card">
+            <h3>${g.home_team_id} vs ${g.away_team_id}</h3>
+            <p><strong>Semana ${g.week}</strong></p>
+            <p>Score: <strong>${g.home_score}-${g.away_score}</strong></p>
+            <p><span class="game-status ${statusClass}">${g.status}</span></p>
+          </div>
+        `
+      }).join('')
+    }
+
+    async function loadUsers() {
+      const data = await apiCall('/api/users')
+      const el = document.getElementById('usersContainer')
+      if (!data || !data.users) {
+        el.innerHTML = '<div class="error">No se pudieron cargar los usuarios</div>'
+        return
+      }
+      el.innerHTML = data.users.slice(0, 5).map(u => `
+        <div class="user-card">
+          <h3>${u.full_name || u.username}</h3>
+          <p>@${u.username}</p>
+          <p>${u.email}</p>
+        </div>
+      `).join('')
+    }
+
+    async function loadLeaderboard() {
+      const data = await apiCall('/api/leaderboard')
+      const el = document.getElementById('leaderboardContainer')
+      if (!data || !data.leaderboard) {
+        el.innerHTML = '<div class="error">No se pudieron cargar el leaderboard</div>'
+        return
+      }
+      el.innerHTML = data.leaderboard.slice(0, 5).map((u, i) => `
+        <div class="user-card">
+          <h3>#${i + 1} ${u.username}</h3>
+          <p><strong>${u.points || 0}</strong> puntos</p>
+          <p>Correctas: ${u.correct_predictions || 0} | Incorrectas: ${u.incorrect_predictions || 0}</p>
+        </div>
+      `).join('')
+    }
+
+    async function loadPredictions() {
+      const data = await apiCall('/api/predictions')
+      const el = document.getElementById('predictionsContainer')
+      if (!data || !data.predictions) {
+        el.innerHTML = '<div class="error">No se pudieron cargar las predicciones</div>'
+        return
+      }
+      el.innerHTML = data.predictions.slice(0, 5).map(p => `
+        <div class="pred-card">
+          <h3>Juego ${p.game_id}</h3>
+          <p>Usuario: <strong>${p.user_id}</strong></p>
+          <p>Predicción: <strong>${p.predicted_winner_id}</strong></p>
+          <p>Status: <strong>${p.status}</strong></p>
+        </div>
+      `).join('')
+    }
+
+    async function loadStats() {
+      const el = document.getElementById('statsContainer')
+      const teams = await apiCall('/api/teams')
+      const games = await apiCall('/api/games')
+      const users = await apiCall('/api/users')
+      const preds = await apiCall('/api/predictions')
+      const lb = await apiCall('/api/leaderboard')
+
+      el.innerHTML = `
+        <div class="user-card">
+          <p><strong>Equipos:</strong> ${teams?.total || 0}</p>
+        </div>
+        <div class="user-card">
+          <p><strong>Juegos:</strong> ${games?.total || 0}</p>
+        </div>
+        <div class="user-card">
+          <p><strong>Usuarios:</strong> ${users?.total || 0}</p>
+        </div>
+        <div class="user-card">
+          <p><strong>Predicciones:</strong> ${preds?.total || 0}</p>
+        </div>
+        <div class="user-card">
+          <p><strong>Usuarios en Ranking:</strong> ${lb?.total_users || 0}</p>
+        </div>
+      `
+    }
+
+    async function init() {
+      await checkHealth()
+      await Promise.all([
+        loadTeams(),
+        loadGames(),
+        loadUsers(),
+        loadLeaderboard(),
+        loadPredictions(),
+        loadStats()
+      ])
+    }
+
+    // Load on page ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init)
+    } else {
+      init()
+    }
+
+    // Refresh every 30 seconds
+    setInterval(init, 30000)
+  </script>
+</body>
+</html>
